@@ -661,20 +661,36 @@ struct LatexMCP {
     static func main() async throws {
         let server = Server(
             name: "che-latex-mcp",
-            version: "0.2.0",
+            version: "0.5.0",
             capabilities: .init(tools: .init(listChanged: false))
         )
 
         // 列出所有 tools
         await server.withMethodHandler(ListTools.self) { _ in
             return .init(tools: [
+                // 既有：基本編譯與分析
                 compileLatexTool,
                 checkErrorsTool,
                 getDocumentInfoTool,
                 analyzePagesTool,
                 getPageContentTool,
                 findPagebreaksTool,
-                previewPageTool
+                previewPageTool,
+                // 新增 v0.3.0：視覺驗證與排版偵測
+                compileDiffTool,
+                comparePdfsTool,
+                compileChunkTool,
+                previewRangeTool,
+                getPageMetricsTool,
+                extractBlocksTool,
+                findOverlapsTool,
+                detectLayoutIssuesTool,
+                fontsCheckTool,
+                boxWarningsTool,
+                punctCheckTool,
+                // 新增 v0.5.0：Pillar 5 — annotation-driven workflow
+                extractAnnotationsTool,
+                annotationToSourceTool,
             ])
         }
 
@@ -727,6 +743,107 @@ struct LatexMCP {
                 let result = previewPage(pdfPath: pdfPath, pageNumber: pageNumber, outputPath: outputPath)
                 return .init(content: [.text(result)], isError: false)
 
+            case "compile_diff":
+                let proj   = params.arguments?["project_path"]?.stringValue ?? ""
+                let main   = params.arguments?["main_file"]?.stringValue ?? "main"
+                let engine = params.arguments?["engine"]?.stringValue ?? "xelatex"
+                let ref    = params.arguments?["git_ref"]?.stringValue ?? "HEAD~1"
+                let range  = params.arguments?["page_range"]?.stringValue
+                let out    = params.arguments?["output_dir"]?.stringValue ?? "/tmp/latex_diff"
+                let result = compileDiff(projectPath: proj, mainFile: main, engine: engine, gitRef: ref, pageRange: range, outputDir: out)
+                return .init(content: [.text(result)], isError: false)
+
+            case "compare_pdfs":
+                let before = params.arguments?["before_pdf"]?.stringValue ?? ""
+                let after  = params.arguments?["after_pdf"]?.stringValue ?? ""
+                let range  = params.arguments?["page_range"]?.stringValue
+                let out    = params.arguments?["output_dir"]?.stringValue ?? "/tmp/latex_diff"
+                let save   = Bool(params.arguments?["save_diff_images"] ?? .bool(true), strict: false) ?? true
+                let result = comparePdfs(beforePdf: before, afterPdf: after, pageRange: range, outputDir: out, saveDiffImages: save)
+                return .init(content: [.text(result)], isError: false)
+
+            case "compile_chunk":
+                let frag = params.arguments?["tex_fragment"]?.stringValue ?? ""
+                let pre  = params.arguments?["preamble_path"]?.stringValue
+                let out  = params.arguments?["output_dir"]?.stringValue ?? "/tmp/latex_chunk"
+                let eng  = params.arguments?["engine"]?.stringValue ?? "xelatex"
+                let result = compileChunk(texFragment: frag, preamblePath: pre, outputDir: out, engine: eng)
+                return .init(content: [.text(result)], isError: false)
+
+            case "preview_range":
+                let pdfPath = params.arguments?["pdf_path"]?.stringValue ?? ""
+                let range   = params.arguments?["page_range"]?.stringValue ?? ""
+                let out     = params.arguments?["output_dir"]?.stringValue ?? "/tmp/latex_pages"
+                let scale   = Double(params.arguments?["scale"] ?? .double(2.0), strict: false) ?? 2.0
+                let result = previewRange(pdfPath: pdfPath, pageRange: range, outputDir: out, scale: CGFloat(scale))
+                return .init(content: [.text(result)], isError: false)
+
+            case "get_page_metrics":
+                let pdfPath = params.arguments?["pdf_path"]?.stringValue ?? ""
+                let page    = Int(params.arguments?["page_number"] ?? .int(1), strict: false) ?? 1
+                let result = getPageMetrics(pdfPath: pdfPath, pageNumber: page)
+                return .init(content: [.text(result)], isError: false)
+
+            case "extract_blocks":
+                let pdfPath = params.arguments?["pdf_path"]?.stringValue ?? ""
+                let page    = Int(params.arguments?["page_number"] ?? .int(1), strict: false) ?? 1
+                let result = extractBlocks(pdfPath: pdfPath, pageNumber: page)
+                return .init(content: [.text(result)], isError: false)
+
+            case "find_overlaps":
+                let pdfPath  = params.arguments?["pdf_path"]?.stringValue ?? ""
+                let range    = params.arguments?["page_range"]?.stringValue
+                let threshold = Double(params.arguments?["threshold"] ?? .double(4.0), strict: false) ?? 4.0
+                let result = findOverlaps(pdfPath: pdfPath, pageRange: range, threshold: CGFloat(threshold))
+                return .init(content: [.text(result)], isError: false)
+
+            case "detect_layout_issues":
+                let pdfPath = params.arguments?["pdf_path"]?.stringValue ?? ""
+                let range   = params.arguments?["page_range"]?.stringValue
+                let result = detectLayoutIssues(pdfPath: pdfPath, pageRange: range)
+                return .init(content: [.text(result)], isError: false)
+
+            case "fonts_check":
+                let proj = params.arguments?["project_path"]?.stringValue ?? ""
+                let main = params.arguments?["main_file"]?.stringValue ?? "main"
+                let result = fontsCheck(projectPath: proj, mainFile: main)
+                return .init(content: [.text(result)], isError: false)
+
+            case "box_warnings":
+                let proj = params.arguments?["project_path"]?.stringValue ?? ""
+                let main = params.arguments?["main_file"]?.stringValue ?? "main"
+                let sev  = params.arguments?["severity_min"]?.stringValue
+                let result = boxWarnings(projectPath: proj, mainFile: main, severityMin: sev)
+                return .init(content: [.text(result)], isError: false)
+
+            case "punct_check":
+                let src = params.arguments?["source_path"]?.stringValue ?? ""
+                let result = punctCheck(sourcePath: src)
+                return .init(content: [.text(result)], isError: false)
+
+            case "extract_annotations":
+                let pdf = params.arguments?["pdf_path"]?.stringValue ?? ""
+                let minLen = Int(params.arguments?["min_comment_length"] ?? .int(1), strict: false) ?? 1
+                let maxChars = Int(params.arguments?["surrounding_max_chars"] ?? .int(80), strict: false) ?? 80
+                let result = extractAnnotations(pdfPath: pdf, minCommentLength: minLen, surroundingMaxChars: maxChars)
+                return .init(content: [.text(result)], isError: false)
+
+            case "annotation_to_source":
+                let surrounding = params.arguments?["surrounding_text"]?.stringValue ?? ""
+                let src = params.arguments?["source_dir"]?.stringValue ?? ""
+                let maxC = Int(params.arguments?["max_candidates"] ?? .int(5), strict: false) ?? 5
+                let excludes: Set<String> = {
+                    guard let arr = params.arguments?["exclude_dirs"]?.arrayValue else { return [] }
+                    return Set(arr.compactMap { $0.stringValue })
+                }()
+                let exts: Set<String> = {
+                    guard let arr = params.arguments?["file_extensions"]?.arrayValue else { return ["tex"] }
+                    let parsed = Set(arr.compactMap { $0.stringValue })
+                    return parsed.isEmpty ? ["tex"] : parsed
+                }()
+                let result = annotationToSource(surroundingText: surrounding, sourceDir: src, maxCandidates: maxC, excludeDirs: excludes, fileExtensions: exts)
+                return .init(content: [.text(result)], isError: false)
+
             default:
                 return .init(content: [.text("Unknown tool: \(params.name)")], isError: true)
             }
@@ -734,5 +851,6 @@ struct LatexMCP {
 
         let transport = StdioTransport()
         try await server.start(transport: transport)
+        await server.waitUntilCompleted()
     }
 }
